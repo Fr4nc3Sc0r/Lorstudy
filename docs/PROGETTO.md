@@ -1,211 +1,241 @@
 # Lorstudy — Definizione del progetto
 
-> Assistente di studio con IA per materie umanistiche (italiano, storia, filosofia, latino…).
-> Trasforma i materiali dello studente in riassunti, mappe concettuali, quiz, flashcard e linee del tempo.
+> App Android per lo studio delle materie umanistiche (italiano, storia, filosofia, latino…).
+> **Input:** il libro (PDF, EPUB, DOCX, foto delle pagine).
+> **Output:** riassunti, mappe concettuali, linee del tempo, schede, flashcard, quiz e simulazioni di verifica.
+
+Lorstudy mantiene la **logica di Lordoc Android**: Java nativo, nessun account, dati sul telefono,
+formato testuale validato dal parser, modalità Studio/Simulazione, statistiche per elemento, storico, CI
+che produce l'APK, AdMob + UMP. Cambia la **struttura**: Lordoc parte da una banca domande fissa negli
+assets; Lorstudy parte da un **libro** e costruisce i contenuti con una **pipeline** di generazione.
 
 ---
 
-## 1. Idea e obiettivo
+## 1. Idea in una riga
 
-Lo studente carica un materiale (PDF del libro, foto di appunti, testo incollato, link, audio della lezione) e Lorstudy lo trasforma in **strumenti di studio attivo**:
+*Carichi il libro, scegli il capitolo, e Lorstudy ti prepara tutto il necessario per capirlo,
+memorizzarlo e verificarti.*
 
-| Strumento | A cosa serve |
+## 2. Il flusso
+
+```
+ LIBRO ──▶ 1. IMPORT ──▶ 2. STRUTTURA ──▶ 3. GENERAZIONE ──▶ 4. VALIDAZIONE ──▶ 5. STUDIO ──▶ 6. VERIFICA
+ PDF/EPUB   estrazione    capitoli,        un generatore      parser per           lettura,      quiz, esiti,
+ DOCX/foto  testo + OCR   paragrafi,       per tipo di        formato (come        flashcard     storico,
+                          pagine           contenuto (IA)     QuestionParser)      con SRS       punti deboli
+```
+
+1. **Import** — PDF con testo (estrazione diretta), PDF scansionato o foto (OCR on‑device, ML Kit), EPUB, DOCX, testo incollato.
+2. **Struttura** — il libro viene diviso in **Capitoli → Sezioni** (dall'indice del PDF se c'è, altrimenti con euristiche sui titoli + conferma dell'utente). Ogni sezione conserva i numeri di pagina, per citare la fonte.
+3. **Generazione** — l'utente sceglie *cosa* generare e *su quale parte* (una sezione, un capitolo, più capitoli). Ogni tipo di contenuto ha un suo generatore con un prompt e un formato fissi.
+4. **Validazione** — l'output dell'IA viene letto da un parser dedicato (come `QuestionParser` in Lordoc): blocchi malformati vengono scartati e segnalati, mai mostrati.
+5. **Studio** — lettura di riassunti/mappe/schede, ripasso flashcard con ripetizione spaziata.
+6. **Verifica** — quiz e simulazioni con la stessa logica d'esame di Lordoc; statistiche per argomento.
+
+## 3. Contenuti generati
+
+| Tipo | Formato di output | Schermata | Note |
+|---|---|---|---|
+| **Riassunto** (breve / medio / per punti) | Markdown | lettore (WebView) | Ogni paragrafo con rimando di pagina |
+| **Mappa concettuale** | `[MAP]` nodi + archi | `ConceptMapView` (Canvas) | Relazioni: causa, conseguenza, parte di, autore di… |
+| **Linea del tempo** | `[EVENT]` data + titolo + descrizione | `TimelineView` | Soprattutto storia |
+| **Scheda autore / opera** | Markdown a sezioni fisse | lettore | Vita, poetica, opere, temi, contesto |
+| **Analisi del testo** | Markdown a sezioni fisse | lettore | Parafrasi, figure retoriche, metrica, temi |
+| **Glossario** | `[TERM]` termine + definizione | lista | Diventa anche flashcard |
+| **Flashcard** | `[C]` fronte / retro | `FlashcardActivity` | Ripetizione spaziata (SM‑2) |
+| **Quiz** | `[Q]…[/Q]` **formato Lordoc** | `ExamActivity` | SINGLE, MULTI, FILL, DRAG |
+| **Domande aperte** | `[Q]` con `type: OPEN` | `ExamActivity` | Correzione IA con voto e punti mancanti |
+| **Interrogazione simulata** | chat | `OralActivity` | v0.3 |
+
+Esempi dei formati (tutti testuali, a blocchi, come Lordoc):
+
+```text
+[Q]
+id: STO-C03-007
+topic: C03
+type: DRAG
+text:
+Abbina ogni evento al suo anno.
+items:
+Presa della Bastiglia => 1789
+Congresso di Vienna => 1815
+targets: 1789, 1815, 1848
+explanation:
+La Rivoluzione inizia nel 1789; il Congresso di Vienna (1814-15) apre la Restaurazione.
+reference: p. 112-118
+[/Q]
+
+[C]
+id: STO-C03-F012
+front: Che cosa stabilì il principio di legittimità?
+back: Il ritorno sui troni dei sovrani spodestati da Napoleone (Congresso di Vienna).
+reference: p. 117
+[/C]
+
+[MAP]
+title: Cause della Rivoluzione francese
+node: n1 | Crisi finanziaria
+node: n2 | Convocazione degli Stati Generali
+edge: n1 -> n2 | causa
+[/MAP]
+
+[EVENT]
+date: 1789-07-14
+title: Presa della Bastiglia
+text: Il popolo di Parigi assalta la fortezza, simbolo dell'assolutismo.
+reference: p. 113
+[/EVENT]
+```
+
+**Perché testo a blocchi e non JSON:** è la scelta di Lordoc — leggibile, modificabile a mano,
+importabile da file, e un blocco rotto non invalida tutto il file.
+
+## 4. Cosa resta uguale a Lordoc (la "logica")
+
+| Logica Lordoc | In Lorstudy |
 |---|---|
-| **Riassunto** (breve / medio / esteso / per punti) | Capire il contenuto in fretta |
-| **Mappa concettuale** | Vedere relazioni causa‑effetto, autori‑opere, eventi‑conseguenze |
-| **Linea del tempo** (storia) | Collocare eventi e periodi |
-| **Schede autore / opera** (italiano) | Vita, poetica, opere, temi, contesto |
-| **Analisi del testo guidata** (poesia/prosa) | Parafrasi, figure retoriche, metrica, temi |
-| **Flashcard** con ripetizione spaziata | Memorizzare date, definizioni, concetti |
-| **Quiz** (risposta multipla, V/F, completamento, aperte con correzione IA) | Verificarsi |
-| **Simulazione interrogazione** (chat/voce) | Allenarsi all'orale |
-| **Glossario** | Termini chiave con definizioni |
+| Banca domande da file `.txt` + `index.txt`, parser con errori per riga | Ogni libro ha i suoi file generati; stesso parser esteso con `[C]`, `[MAP]`, `[EVENT]`, `[TERM]` |
+| `Domain` con peso e `DomainScore` | **Capitolo/argomento** con accuratezza per capitolo; peso = lunghezza del capitolo |
+| `ExamFactory`: esami predefiniti disgiunti, distribuzione pesata | **Verifiche per capitolo** e **verifica generale** sul libro, stessa distribuzione pesata |
+| `QuestionFilter`: tutte / mai viste / sbagliate / marcate | Identico, + "in scadenza" per le flashcard |
+| `ExamMode`: Studio / Simulazione a tempo, divieto di tornare indietro | Studio / **Verifica in classe** |
+| Opzioni mescolate a ogni esame | Identico |
+| `Scorer` | Voto in **decimi** (e trentesimi per università) invece di 300–1000 |
+| `QuestionStat` (viste, corrette, ultima risposta, marcata) | Identico, + stato SRS per le flashcard |
+| `UserDataStore`: TSV nella cartella privata | Identico, una cartella per libro |
+| Storico + `ScoreChartView`, revisione errori | Identico |
+| Importazione file `.txt` dal telefono | Import e **export** dei contenuti (condividere un set con i compagni) |
+| `BaseActivity`, `Ui`, `Ads`, CI GitHub Actions, `release.properties` | Identici |
 
-**Principio guida:** l'IA lavora *solo sul materiale dello studente* (approccio RAG), così riduce gli errori e resta aderente al programma del docente.
+## 5. Cosa cambia (la "struttura")
 
-## 2. Target
+**Lordoc:** contenuti statici negli assets → caricati all'avvio → esame.
+**Lorstudy:** biblioteca dell'utente → pipeline asincrona → contenuti salvati → studio/verifica.
 
-- Studenti di scuola secondaria (medie e superiori) e università (lettere, storia, filosofia).
-- Uso principale: preparazione di verifiche, interrogazioni, esami, maturità.
-
-## 3. Requisiti funzionali
-
-### MVP (v0.1)
-1. **Import materiali**: testo incollato, PDF, DOCX, immagini (OCR).
-2. **Organizzazione**: Materie → Argomenti → Materiali.
-3. **Generazione**: riassunto, mappa concettuale, flashcard, quiz a risposta multipla.
-4. **Modifica**: ogni output è modificabile dallo studente.
-5. **Studio flashcard** con algoritmo di ripetizione spaziata (SM‑2 o FSRS).
-6. **Quiz** con punteggio e spiegazione delle risposte sbagliate.
-7. **Esportazione**: PDF / Markdown / Anki (.apkg o CSV).
-
-### v0.2
-8. Linea del tempo interattiva, schede autore/opera, analisi del testo.
-9. Domande aperte corrette dall'IA con feedback.
-10. Simulazione d'interrogazione (chat).
-11. Statistiche: argomenti deboli, streak, tempo di studio.
-
-### v0.3+
-12. Audio lezione → trascrizione → riassunto.
-13. Modalità voce per l'interrogazione.
-14. Condivisione set di flashcard/quiz tra compagni, classi del docente.
-15. Piano di studio verso una data di verifica.
-
-## 4. Requisiti non funzionali
-
-- **Costo zero o quasi**: solo modelli e servizi con piano gratuito.
-- **Affidabilità**: ogni risposta cita il passo del materiale da cui deriva; avviso se l'informazione non è presente nella fonte.
-- **Privacy** (come Lordoc): nessun account, dati sul telefono; al provider IA si invia solo il testo da elaborare; consenso GDPR con UMP; attenzione agli utenti minorenni.
-- **App Android nativa** (min Android 8.0, target API 36); ripasso di flashcard e quiz **offline**, IA solo per generare.
-- **Lingua**: interfaccia e prompt in italiano.
-- **Accessibilità**: font leggibili, modalità dislessia (OpenDyslexic, sintesi vocale).
-
-## 5. Architettura (allineata a Lordoc Android)
-
-Lorstudy riprende l'impostazione di **Lordoc Android** (simulatore CCNA): app **Android nativa in Java**,
-API standard, nessun account, dati sul telefono, CI su GitHub Actions che produce l'APK, AdMob + UMP
-per il consenso GDPR. Cambia il contenuto: invece di una banca domande fissa, i contenuti vengono
-**generati dall'IA** a partire dai materiali dello studente.
+### Pacchetti
 
 ```
-┌──────────────────────────┐   HTTPS/JSON   ┌───────────────────────┐   ┌───────────────────────┐
-│ App Android (Java)       │ ─────────────▶ │ Gateway IA            │──▶│ LLM gratuiti          │
-│ - import PDF/foto/testo  │                │ A) n8n (webhook)      │   │ Gemini Flash (princ.) │
-│ - engine quiz (da Lordoc)│ ◀───────────── │ B) chiamata diretta   │   │ Groq (veloce/Whisper) │
-│ - flashcard SRS, mappe   │  formato .txt  │    con chiave utente  │   │ OpenRouter :free      │
-│ - storico, statistiche   │  tipo Lordoc   └───────────────────────┘   └───────────────────────┘
-└──────────────────────────┘
-   dati locali: cartella privata app (come UserDataStore di Lordoc)
+com.lorstudy
+├── model/        Book, Chapter, Section, Question, Flashcard, ConceptMap, TimelineEvent, Term,
+│                 StudySession, Response, Result, ContentType, SessionMode
+├── ingest/       PdfExtractor, EpubExtractor, DocxExtractor, OcrExtractor,
+│                 StructureDetector (indice/titoli → capitoli), TextCleaner, Chunker
+├── generate/     GenerationJob, GenerationQueue, PromptLibrary (prompt per tipo),
+│                 Generator (interfaccia) + SummaryGen, MapGen, QuizGen, FlashcardGen, TimelineGen…
+├── ai/           AiProvider (interfaccia), GeminiProvider, GroqProvider, OpenRouterProvider,
+│                 N8nProvider, ProviderChain (fallback, retry, limiti di frequenza)
+├── format/       BlockParser (base comune) + QuestionParser, FlashcardParser, MapParser,
+│                 EventParser, TermParser, ParseReport (errori per blocco)
+├── engine/       SessionFactory, ContentFilter, Scorer, Srs (SM‑2), WeightedPicker
+├── data/         Library (libri e capitoli), ContentStore (file generati), UserDataStore (TSV),
+│                 ResourceOpener
+├── util/         Text, Hashing, ecc.
+└── android/      LibraryActivity, BookActivity, ImportActivity, GenerateActivity,
+                  ReaderActivity, ConceptMapView, TimelineView, FlashcardActivity,
+                  ExamActivity, ResultsActivity, ReviewActivity, HistoryActivity,
+                  SettingsActivity, BaseActivity, Ui, Ads
 ```
 
-### Cosa si riusa da Lordoc Android
-| Componente Lordoc | Uso in Lorstudy |
-|---|---|
-| `model/` (`Question`, `QuestionType`, `ExamSession`, `Response`) | Quiz: SINGLE, MULTI, FILL, DRAG (es. abbinare autore→opera, evento→secolo) |
-| `data/QuestionParser` + formato `[Q]…[/Q]` | **Formato di scambio con l'IA**: l'LLM genera domande in questo formato, il parser le valida (già gestisce gli errori) |
-| `engine/` (`ExamFactory`, `QuestionFilter`, `Scorer`) | Verifiche: filtro mai viste / sbagliate / marcate, punteggio in decimi invece di 300–1000 |
-| `Domain` / `DomainScore` | Diventano **Materia → Argomento**, con accuratezza per argomento |
-| Modalità **Studio** / **Simulazione** | Studio = spiegazione subito; Simulazione = "verifica in classe" a tempo |
-| `ExamActivity`, `ResultsActivity`, `ReviewActivity`, `HistoryActivity`, `ScoreChartView` | Stesse schermate, testi adattati |
-| `ReferenceActivity` (cheat sheet HTML) | Mostra **riassunti, schede autore e mappe** generati (HTML/Markdown in WebView) |
-| `Ads`, `BaseActivity`, `Ui`, CI `build.yml`, `release.properties` | Identici |
+### Schermate
 
-### Nuovi componenti
-- `ImportActivity`: testo, PDF (`PdfRenderer` + estrazione testo), foto (ML Kit OCR on‑device, gratuito).
-- `AiClient`: chiama il gateway, riceve testo/JSON, retry e fallback tra provider.
-- `FlashcardActivity` + `engine/Srs` (algoritmo SM‑2, semplice e senza librerie).
-- `MapView`: mappa concettuale disegnata a mano su `Canvas` (come `ScoreChartView`) oppure Markmap in WebView.
-- `TimelineView`: linea del tempo per storia.
+1. **Biblioteca** — i tuoi libri (copertina, materia, % studiato). Pulsante *Aggiungi libro*.
+2. **Libro** — indice dei capitoli; per ogni capitolo i contenuti già generati e i pulsanti per generarne altri; accuratezza per capitolo.
+3. **Genera** — scelta del tipo, dell'intervallo (sezione/capitolo/pagine), delle opzioni (lunghezza, numero di domande, difficoltà); avanzamento della coda.
+4. **Lettore** — riassunti, schede, analisi, con link alla pagina del libro.
+5. **Mappa** / **Timeline** — zoom e trascinamento.
+6. **Flashcard** — ripasso del giorno (tutti i libri o uno solo).
+7. **Verifica** / **Risultati** / **Revisione** / **Storico** — come Lordoc.
+8. **Impostazioni** — provider IA e chiave, lingua dei contenuti, livello scolastico, consenso annunci.
 
-### Gateway IA: due opzioni
-| | A) n8n | B) chiamata diretta dall'app |
-|---|---|---|
-| Pro | Prompt modificabili senza aggiornare l'app; fallback tra provider; chiavi non nell'APK | Nessun server, zero costi, funziona subito |
-| Contro | Serve hosting (VPS/Render/Railway, o n8n sul tuo PC) | Ogni utente inserisce la sua chiave Gemini gratuita (o la chiave finisce nell'APK: **da evitare**) |
-| Quando | Pubblicazione su Play Store | Prototipo / uso personale |
-
-**Consiglio:** partire con **B** (chiave Gemini gratuita dell'utente nelle impostazioni) per avere l'app
-funzionante subito, e tenere l'`AiClient` astratto per passare ad **A (n8n)** al momento della pubblicazione.
-
-## 6. Workflow IA (n8n)
-
-**Workflow "Ingest"** — `POST /webhook/ingest`
-1. Ricevi file → estrai testo (PDF parser / OCR).
-2. Pulisci e dividi in blocchi (~1000 token, sovrapposizione 150).
-3. Restituisce il testo pulito all’app, che lo salva in `fonte.txt` (embeddings solo se il materiale supera il contesto del modello).
-4. Genera automaticamente titolo, materia rilevata, parole chiave.
-
-**Workflow "Genera"** — `POST /webhook/generate { materialId, tipo, opzioni }`
-1. Riceve il testo del materiale dall’app (Gemini Flash gestisce capitoli interi).
-2. Scegli il prompt in base a `tipo` (riassunto, mappa, quiz, flashcard, timeline…).
-3. Chiama l’LLM chiedendo output in formato fisso (JSON, oppure `[Q]…[/Q]` per i quiz).
-4. Valida l’output (nell’app con `QuestionParser`) (se invalido → riprova / fallback su altro provider).
-5. Restituisce all’app, che salva in locale.
-
-**Workflow "Correggi"** — risposte aperte e interrogazione: confronta la risposta dello studente con la fonte, restituisce voto, punti mancanti, suggerimenti.
-
-### Esempi di schema di output
-```json
-// flashcard
-{ "cards": [ { "fronte": "Anno della pace di Westfalia?", "retro": "1648", "fonte": "p. 42", "tag": ["storia","'600"] } ] }
-
-// quiz
-{ "domande": [ { "testo": "...", "opzioni": ["A","B","C","D"], "corretta": 2, "spiegazione": "...", "difficolta": "media" } ] }
-
-// mappa concettuale
-{ "nodi": [ { "id": "1", "label": "Rivoluzione francese" } ],
-  "archi": [ { "da": "1", "a": "2", "relazione": "causa" } ] }
-
-// timeline
-{ "eventi": [ { "data": "1789-07-14", "titolo": "Presa della Bastiglia", "descrizione": "..." } ] }
-```
-
-## 7. Dati (locali, come in Lordoc)
-
-Nessun account: tutto nella cartella privata dell'app, con file di testo come fa `UserDataStore`.
+### Dati sul telefono
 
 ```
 files/
-├── materie/<materia>/<argomento>/
-│   ├── fonte.txt          testo estratto dal materiale
-│   ├── riassunto.md
-│   ├── mappa.json         { nodi, archi }
-│   ├── timeline.json      { eventi }
-│   ├── quiz.txt           formato [Q]...[/Q] di Lordoc
-│   └── flashcard.txt      blocchi [C] fronte / retro [/C]
-├── srs.txt                stato flashcard (intervallo, scadenza, facilità)
-└── storico.txt            verifiche svolte (come Lordoc)
+├── library.tsv                     elenco libri
+└── books/<bookId>/
+    ├── source.pdf                  copia del libro (opzionale)
+    ├── text/<sectionId>.txt        testo estratto per sezione, con marcatori di pagina
+    ├── structure.tsv               capitoli, sezioni, pagine
+    ├── content/<chapterId>/
+    │   ├── summary_medium.md
+    │   ├── map.txt  timeline.txt  terms.txt
+    │   ├── quiz.txt  flashcards.txt
+    │   └── author_<nome>.md
+    ├── stats.tsv  srs.tsv  history.tsv
+    └── jobs.tsv                    generazioni in corso / fallite
 ```
 
-Esempio di domanda generata (stesso formato di Lordoc, `domain` = argomento):
-```text
-[Q]
-id: ST-RIVFR-001
-domain: 3
-type: SINGLE
-text:
-In che anno avvenne la presa della Bastiglia?
-options:
-A) 1776
-B) 1789
-C) 1799
-D) 1815
-answer: B
-explanation:
-Il 14 luglio 1789 il popolo di Parigi assaltò la Bastiglia, simbolo dell'assolutismo.
-reference: Libro p. 112
-[/Q]
-```
+## 6. IA gratuita
 
-## 8. Caratteristiche distintive (rispetto a ChatGPT generico)
-
-1. **Specializzazione umanistica**: schede autore, analisi del testo, timeline, rapporti causa‑effetto.
-2. **Fedeltà alla fonte** con citazione della pagina.
-3. **Ciclo completo**: capire (riassunto/mappa) → memorizzare (flashcard) → verificare (quiz/interrogazione).
-4. **Gratis**, basata su provider con piani gratuiti.
-5. **Pensata per la scuola italiana** (lessico, programmi, maturità).
-
-## 9. Roadmap
-
-| Fase | Durata indicativa | Risultato |
+| Provider | Uso | Perché |
 |---|---|---|
-| 0. Prompt lab | 1 sett. | Workflow n8n con prompt testati su materiali reali |
-| 1. MVP | 3–4 sett. | Import, riassunto, mappa, flashcard, quiz, ripasso |
-| 2. Umanistica+ | 3 sett. | Timeline, schede autore, analisi testo, domande aperte |
-| 3. Orale | 2 sett. | Simulazione interrogazione, audio |
-| 4. Social/docenti | — | Condivisione, classi |
+| **Google Gemini Flash** (AI Studio) | principale | contesto lunghissimo: un capitolo intero in una chiamata; legge anche PDF e immagini |
+| **Groq** (Llama/Qwen) | quiz, flashcard, chat | molto veloce |
+| **OpenRouter** (modelli `:free`) | riserva | quando gli altri raggiungono i limiti |
+| **Ollama** sul PC | facoltativo | zero limiti, privacy totale |
 
-## 10. Rischi e mitigazioni
+`ProviderChain` prova i provider in ordine; se l'output non supera il parser, ritenta una volta
+chiedendo di correggere il formato, poi passa al successivo.
+
+**Gateway:**
+- **Fase 1 – chiave dell'utente**: l'utente incolla la sua chiave gratuita di Gemini nelle impostazioni (salvata cifrata con Android Keystore). Nessun server.
+- **Fase 2 – n8n** (per il Play Store): l'app chiama `POST /webhook/generate { tipo, testo, opzioni }`; n8n sceglie il provider, applica il prompt e risponde nel formato a blocchi. Prompt aggiornabili senza nuova versione dell'app; nessuna chiave nell'APK.
+
+**Testi lunghi:** se un capitolo supera il contesto del modello, `Chunker` lo divide, si genera per parti e
+poi si fondono i risultati (map‑reduce per i riassunti, unione + deduplica per quiz e flashcard).
+
+## 7. Requisiti
+
+### Funzionali — MVP (v0.1)
+1. Import PDF con testo e testo incollato.
+2. Rilevamento capitoli dall'indice del PDF, modificabile a mano.
+3. Generazione di riassunto, flashcard e quiz (SINGLE/MULTI) per capitolo.
+4. Parser e segnalazione degli errori di formato.
+5. Ripasso flashcard con SM‑2; verifiche per capitolo in modalità Studio e Verifica.
+6. Risultati, revisione, storico, accuratezza per capitolo.
+7. Impostazione della chiave Gemini.
+
+### v0.2
+8. OCR di PDF scansionati e foto; EPUB e DOCX.
+9. Mappa concettuale, linea del tempo, glossario, scheda autore/opera, analisi del testo.
+10. Domande FILL, DRAG e aperte con correzione IA.
+11. Export/import dei contenuti e verifica generale sul libro.
+
+### v0.3+
+12. Interrogazione simulata (chat, poi voce).
+13. Gateway n8n e pubblicazione su Play Store.
+14. Piano di studio verso la data della verifica.
+
+### Non funzionali
+- Android 8.0+ (minSdk 26), target API 36, Java, nessuna libreria oltre AdMob/UMP, ML Kit (OCR) e un estrattore PDF.
+- Studio e verifiche **offline**; rete solo per generare.
+- Al provider IA si invia solo il testo da elaborare; il libro resta sul telefono.
+- Nessun annuncio durante una verifica o un ripasso (come Lordoc).
+- Contenuti in italiano; ogni elemento con riferimento di pagina.
+- Test automatici: ogni parser ha test con blocchi validi e rotti (come `laBancaDomandeSiCaricaSenzaErrori`).
+
+## 8. Rischi
 
 | Rischio | Mitigazione |
 |---|---|
-| Allucinazioni (date, autori sbagliati) | RAG + citazioni + segnalazione errori da parte dell'utente |
-| Limiti dei piani gratuiti | Fallback multi‑provider, cache degli output, generazione su richiesta |
-| Copyright dei libri caricati | Materiali privati per utente, nessuna condivisione pubblica dei testi |
-| Utenti minorenni | Consenso genitori, nessun dato inviato a provider che lo usano per addestramento dove possibile |
+| Errori dell'IA (date, attribuzioni) | Contenuti basati solo sul testo del libro, rimando di pagina, pulsante "segnala/modifica" |
+| Limiti dei piani gratuiti | Generazione su richiesta, coda con ripresa, fallback tra provider |
+| PDF senza testo o impaginati male | OCR, pulizia del testo, correzione manuale dei capitoli |
+| Copyright del libro | Il libro non lascia il telefono salvo il testo inviato al provider; export solo dei contenuti generati |
+| Utenti minorenni | Consenso UMP, nessun account, nessun dato raccolto |
 
-## 11. Domande aperte
+## 9. Roadmap
 
-- Copiare i pacchetti `model/data/engine/util` da Lordoc o estrarli in una libreria comune?
-- Gateway: chiave utente (B) subito, n8n (A) dopo? Dove ospitare n8n?
-- Pubblicazione su Play Store (con AdMob come Lordoc) o solo uso personale?
+| Fase | Risultato |
+|---|---|
+| 0 | Scheletro Android (copia di BaseActivity, Ui, CI) + `format/` e `engine/` portati da Lordoc con test |
+| 1 | Import PDF + struttura capitoli |
+| 2 | `ai/` + generatori di riassunto, flashcard, quiz → **MVP** |
+| 3 | Mappe, timeline, schede, OCR |
+| 4 | Domande aperte, interrogazione, n8n, Play Store |
+
+## 10. Decisioni aperte
+
+- Estrattore PDF: `PdfBox-Android` (completo, ~ alcuni MB) oppure Gemini che legge direttamente il PDF (zero librerie, ma invia il PDF al provider).
+- Codice comune con Lordoc: copiare i pacchetti o estrarre una libreria condivisa.
+- Pubblicazione con AdMob o uso personale.
