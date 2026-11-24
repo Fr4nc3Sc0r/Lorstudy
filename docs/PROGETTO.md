@@ -55,67 +55,72 @@ Lo studente carica un materiale (PDF del libro, foto di appunti, testo incollato
 
 - **Costo zero o quasi**: solo modelli e servizi con piano gratuito.
 - **Affidabilità**: ogni risposta cita il passo del materiale da cui deriva; avviso se l'informazione non è presente nella fonte.
-- **Privacy**: materiali dello studente privati; nessun uso per addestramento; conformità GDPR (utenti minorenni → attenzione al consenso).
-- **Mobile‑first**, funzionante anche offline per il ripasso (PWA).
+- **Privacy** (come Lordoc): nessun account, dati sul telefono; al provider IA si invia solo il testo da elaborare; consenso GDPR con UMP; attenzione agli utenti minorenni.
+- **App Android nativa** (min Android 8.0, target API 36); ripasso di flashcard e quiz **offline**, IA solo per generare.
 - **Lingua**: interfaccia e prompt in italiano.
 - **Accessibilità**: font leggibili, modalità dislessia (OpenDyslexic, sintesi vocale).
 
-## 5. Architettura proposta
+## 5. Architettura (allineata a Lordoc Android)
+
+Lorstudy riprende l'impostazione di **Lordoc Android** (simulatore CCNA): app **Android nativa in Java**,
+API standard, nessun account, dati sul telefono, CI su GitHub Actions che produce l'APK, AdMob + UMP
+per il consenso GDPR. Cambia il contenuto: invece di una banca domande fissa, i contenuti vengono
+**generati dall'IA** a partire dai materiali dello studente.
 
 ```
-┌──────────────┐     HTTPS     ┌──────────────────┐     ┌──────────────────────┐
-│  Frontend    │ ────────────▶ │  Orchestratore IA│ ──▶ │  Provider LLM gratuiti│
-│  PWA (Next.js│               │  n8n (webhook)   │     │  Gemini / Groq /      │
-│  o React)    │ ◀──────────── │  oppure API      │     │  OpenRouter free /    │
-└──────┬───────┘   JSON        │  serverless      │     │  Ollama locale        │
-       │                       └────────┬─────────┘     └──────────────────────┘
-       ▼                                ▼
-┌──────────────────────────────────────────────┐
-│ Supabase (free): Auth, Postgres, Storage,    │
-│ pgvector per la ricerca nei materiali (RAG)  │
-└──────────────────────────────────────────────┘
+┌──────────────────────────┐   HTTPS/JSON   ┌───────────────────────┐   ┌───────────────────────┐
+│ App Android (Java)       │ ─────────────▶ │ Gateway IA            │──▶│ LLM gratuiti          │
+│ - import PDF/foto/testo  │                │ A) n8n (webhook)      │   │ Gemini Flash (princ.) │
+│ - engine quiz (da Lordoc)│ ◀───────────── │ B) chiamata diretta   │   │ Groq (veloce/Whisper) │
+│ - flashcard SRS, mappe   │  formato .txt  │    con chiave utente  │   │ OpenRouter :free      │
+│ - storico, statistiche   │  tipo Lordoc   └───────────────────────┘   └───────────────────────┘
+└──────────────────────────┘
+   dati locali: cartella privata app (come UserDataStore di Lordoc)
 ```
 
-### Stack consigliato
-| Livello | Scelta | Perché |
+### Cosa si riusa da Lordoc Android
+| Componente Lordoc | Uso in Lorstudy |
+|---|---|
+| `model/` (`Question`, `QuestionType`, `ExamSession`, `Response`) | Quiz: SINGLE, MULTI, FILL, DRAG (es. abbinare autore→opera, evento→secolo) |
+| `data/QuestionParser` + formato `[Q]…[/Q]` | **Formato di scambio con l'IA**: l'LLM genera domande in questo formato, il parser le valida (già gestisce gli errori) |
+| `engine/` (`ExamFactory`, `QuestionFilter`, `Scorer`) | Verifiche: filtro mai viste / sbagliate / marcate, punteggio in decimi invece di 300–1000 |
+| `Domain` / `DomainScore` | Diventano **Materia → Argomento**, con accuratezza per argomento |
+| Modalità **Studio** / **Simulazione** | Studio = spiegazione subito; Simulazione = "verifica in classe" a tempo |
+| `ExamActivity`, `ResultsActivity`, `ReviewActivity`, `HistoryActivity`, `ScoreChartView` | Stesse schermate, testi adattati |
+| `ReferenceActivity` (cheat sheet HTML) | Mostra **riassunti, schede autore e mappe** generati (HTML/Markdown in WebView) |
+| `Ads`, `BaseActivity`, `Ui`, CI `build.yml`, `release.properties` | Identici |
+
+### Nuovi componenti
+- `ImportActivity`: testo, PDF (`PdfRenderer` + estrazione testo), foto (ML Kit OCR on‑device, gratuito).
+- `AiClient`: chiama il gateway, riceve testo/JSON, retry e fallback tra provider.
+- `FlashcardActivity` + `engine/Srs` (algoritmo SM‑2, semplice e senza librerie).
+- `MapView`: mappa concettuale disegnata a mano su `Canvas` (come `ScoreChartView`) oppure Markmap in WebView.
+- `TimelineView`: linea del tempo per storia.
+
+### Gateway IA: due opzioni
+| | A) n8n | B) chiamata diretta dall'app |
 |---|---|---|
-| Frontend | **Next.js + Tailwind + shadcn/ui**, PWA | Gratuito su Vercel, mobile‑friendly |
-| Mappe | **React Flow** o **Mermaid / Markmap** | L'IA genera JSON/Markdown → render automatico |
-| Timeline | **vis-timeline** | Linee del tempo interattive |
-| Backend/DB | **Supabase** (piano free) | Auth, DB, storage file, pgvector |
-| Orchestrazione IA | **n8n** (self‑host gratuito, es. su Railway/Render/VPS) | Workflow visuali, facile da modificare |
-| OCR | **Tesseract** (locale) o Gemini vision | Foto di appunti/libri |
-| Trascrizione | **Groq Whisper** (free tier) | Audio delle lezioni |
+| Pro | Prompt modificabili senza aggiornare l'app; fallback tra provider; chiavi non nell'APK | Nessun server, zero costi, funziona subito |
+| Contro | Serve hosting (VPS/Render/Railway, o n8n sul tuo PC) | Ogni utente inserisce la sua chiave Gemini gratuita (o la chiave finisce nell'APK: **da evitare**) |
+| Quando | Pubblicazione su Play Store | Prototipo / uso personale |
 
-### IA gratuite consigliate
-| Provider | Modello | Uso ideale |
-|---|---|---|
-| **Google AI Studio** | Gemini Flash | Contesto molto lungo (capitoli interi), PDF e immagini → **scelta principale** |
-| **Groq** | Llama / Qwen, Whisper | Velocissimo: quiz, flashcard, chat interrogazione, trascrizione |
-| **OpenRouter** (modelli `:free`) | vari | Fallback se gli altri raggiungono i limiti |
-| **Ollama** (locale) | Qwen / Mistral / Gemma | Zero costi e privacy totale, se hai un PC adatto |
-| **Embeddings** | Gemini embeddings o `nomic-embed` via Ollama | RAG sui materiali |
-
-> I limiti dei piani gratuiti cambiano spesso: prevedere **fallback automatico** tra provider nel workflow.
-
-### n8n vs alternativa
-- **n8n** è un'ottima scelta per iniziare: un webhook per ogni strumento, facile da iterare sui prompt.
-- Alternativa senza server da gestire: **API Routes di Next.js + Vercel AI SDK**, che supporta Gemini/Groq/OpenRouter con lo stesso codice. Consiglio: partire con n8n per prototipare i prompt, poi spostare in codice i flussi stabili.
+**Consiglio:** partire con **B** (chiave Gemini gratuita dell'utente nelle impostazioni) per avere l'app
+funzionante subito, e tenere l'`AiClient` astratto per passare ad **A (n8n)** al momento della pubblicazione.
 
 ## 6. Workflow IA (n8n)
 
 **Workflow "Ingest"** — `POST /webhook/ingest`
 1. Ricevi file → estrai testo (PDF parser / OCR).
 2. Pulisci e dividi in blocchi (~1000 token, sovrapposizione 150).
-3. Calcola embeddings → salva in Supabase (`chunks`).
+3. Restituisce il testo pulito all’app, che lo salva in `fonte.txt` (embeddings solo se il materiale supera il contesto del modello).
 4. Genera automaticamente titolo, materia rilevata, parole chiave.
 
 **Workflow "Genera"** — `POST /webhook/generate { materialId, tipo, opzioni }`
-1. Recupera i blocchi rilevanti (o tutto il materiale se entra nel contesto).
+1. Riceve il testo del materiale dall’app (Gemini Flash gestisce capitoli interi).
 2. Scegli il prompt in base a `tipo` (riassunto, mappa, quiz, flashcard, timeline…).
-3. Chiama l'LLM chiedendo **output JSON con schema fisso**.
-4. Valida il JSON (se invalido → riprova / fallback su altro provider).
-5. Salva e restituisce al frontend.
+3. Chiama l’LLM chiedendo output in formato fisso (JSON, oppure `[Q]…[/Q]` per i quiz).
+4. Valida l’output (nell’app con `QuestionParser`) (se invalido → riprova / fallback su altro provider).
+5. Restituisce all’app, che salva in locale.
 
 **Workflow "Correggi"** — risposte aperte e interrogazione: confronta la risposta dello studente con la fonte, restituisce voto, punti mancanti, suggerimenti.
 
@@ -135,16 +140,42 @@ Lo studente carica un materiale (PDF del libro, foto di appunti, testo incollato
 { "eventi": [ { "data": "1789-07-14", "titolo": "Presa della Bastiglia", "descrizione": "..." } ] }
 ```
 
-## 7. Modello dati (essenziale)
+## 7. Dati (locali, come in Lordoc)
 
-- `users` — profilo, livello scolastico
-- `subjects` — materia (Italiano, Storia…)
-- `topics` — argomento (es. "Leopardi", "Prima guerra mondiale")
-- `materials` — file/testo sorgente, testo estratto
-- `chunks` — blocchi + embedding
-- `outputs` — tipo, contenuto JSON, versione
-- `flashcards` — fronte, retro, stato ripetizione spaziata (intervallo, scadenza, facilità)
-- `quiz_attempts` — risposte, punteggio, data
+Nessun account: tutto nella cartella privata dell'app, con file di testo come fa `UserDataStore`.
+
+```
+files/
+├── materie/<materia>/<argomento>/
+│   ├── fonte.txt          testo estratto dal materiale
+│   ├── riassunto.md
+│   ├── mappa.json         { nodi, archi }
+│   ├── timeline.json      { eventi }
+│   ├── quiz.txt           formato [Q]...[/Q] di Lordoc
+│   └── flashcard.txt      blocchi [C] fronte / retro [/C]
+├── srs.txt                stato flashcard (intervallo, scadenza, facilità)
+└── storico.txt            verifiche svolte (come Lordoc)
+```
+
+Esempio di domanda generata (stesso formato di Lordoc, `domain` = argomento):
+```text
+[Q]
+id: ST-RIVFR-001
+domain: 3
+type: SINGLE
+text:
+In che anno avvenne la presa della Bastiglia?
+options:
+A) 1776
+B) 1789
+C) 1799
+D) 1815
+answer: B
+explanation:
+Il 14 luglio 1789 il popolo di Parigi assaltò la Bastiglia, simbolo dell'assolutismo.
+reference: Libro p. 112
+[/Q]
+```
 
 ## 8. Caratteristiche distintive (rispetto a ChatGPT generico)
 
@@ -175,7 +206,6 @@ Lo studente carica un materiale (PDF del libro, foto di appunti, testo incollato
 
 ## 11. Domande aperte
 
-- Il repository **Lordoc** e la documentazione citata non sono presenti in questa sessione: da integrare per allineare stack, stile e convenzioni.
-- Web app, app mobile nativa o entrambe?
-- n8n self‑hosted (dove?) o n8n Cloud?
-- Solo uso personale o pubblico (impatta auth, privacy, costi)?
+- Copiare i pacchetti `model/data/engine/util` da Lordoc o estrarli in una libreria comune?
+- Gateway: chiave utente (B) subito, n8n (A) dopo? Dove ospitare n8n?
+- Pubblicazione su Play Store (con AdMob come Lordoc) o solo uso personale?
